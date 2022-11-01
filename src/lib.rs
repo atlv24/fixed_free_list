@@ -100,7 +100,7 @@ impl<T, const N: usize> FixedFreeList<T, N> {
             // Update `next` to point at the next free space now that the current one will be used
             // # Safety
             // This space is guaranteed to be free, because otherwise `next` wouldn't point at it.
-            self.next = unsafe { self.data[key].assume_init_ref().next };
+            self.next = unsafe { self.data.get_unchecked(key).assume_init_ref().next };
         } else {
             if self.high >= N {
                 // Drops `value`
@@ -112,9 +112,11 @@ impl<T, const N: usize> FixedFreeList<T, N> {
             self.high += 1;
         };
         // Dropping is unneccessary here because `data[key]` is either `usize` or `MaybeUninit<T>::uninit()`
-        self.data[key] = MaybeUninit::new(Block {
-            value: ManuallyDrop::new(value),
-        });
+        unsafe {
+            *self.data.get_unchecked_mut(key) = MaybeUninit::new(Block {
+                value: ManuallyDrop::new(value),
+            });
+        }
         Some(key)
     }
 
@@ -145,7 +147,7 @@ impl<T, const N: usize> FixedFreeList<T, N> {
             if next == key {
                 return true;
             }
-            next = unsafe { self.data[next].assume_init_ref().next };
+            next = unsafe { self.data.get_unchecked(next).assume_init_ref().next };
         }
         false
     }
@@ -176,7 +178,7 @@ impl<T, const N: usize> FixedFreeList<T, N> {
         assert!(!self.is_free(key));
 
         let value = mem::replace(
-            &mut self.data[key],
+            unsafe { self.data.get_unchecked_mut(key) },
             MaybeUninit::new(Block { next: self.next }),
         );
 
@@ -217,7 +219,7 @@ impl<T, const N: usize> FixedFreeList<T, N> {
 
         // # Safety
         // Function invariants imply the space is occupied by an initialized value
-        unsafe { &self.data[key].assume_init_ref().value }
+        unsafe { &self.data.get_unchecked(key).assume_init_ref().value }
     }
 
     /// Provides mutable access to the value at `key`.
@@ -250,7 +252,7 @@ impl<T, const N: usize> FixedFreeList<T, N> {
 
         // # Safety
         // Function invariants imply the space is occupied by an initialized value
-        unsafe { &mut self.data[key].assume_init_mut().value }
+        unsafe { &mut self.data.get_unchecked_mut(key).assume_init_mut().value }
     }
 
     /// Returns an upper bound on the number of elements contained.
@@ -307,12 +309,14 @@ impl<T, const N: usize> FixedFreeList<T, N> {
             let mut next = self.next;
             while next < N {
                 free[next] = true;
-                next = unsafe { self.data[next].assume_init_ref().next };
+                next = unsafe { self.data.get_unchecked(next).assume_init_ref().next };
             }
             for (i, &free) in free.iter().enumerate().take(self.high) {
                 if !free {
                     unsafe {
-                        ManuallyDrop::drop(&mut self.data[i].assume_init_mut().value);
+                        ManuallyDrop::drop(
+                            &mut self.data.get_unchecked_mut(i).assume_init_mut().value,
+                        );
                     }
                 }
             }
@@ -360,7 +364,7 @@ where
         let mut spaces = std::array::from_fn::<Space<&T>, N, _>(|_| Space::Uninit);
         let mut next = self.next;
         while next < N {
-            let free = unsafe { self.data[next].assume_init_ref().next };
+            let free = unsafe { self.data.get_unchecked(next).assume_init_ref().next };
             spaces[next] = Space::Free(free);
             next = free;
         }
@@ -578,6 +582,7 @@ where
 #[cfg(test)]
 mod test {
     use crate::*;
+    use rand::Rng;
     use std::cell::RefCell;
 
     #[test]
@@ -595,6 +600,64 @@ mod test {
         list.free(key1);
         list.free(key2);
         consume(list);
+    }
+
+    #[test]
+    fn test_remove_all() {
+        let mut list = FixedFreeList::<u32, 16>::new();
+        for i in 0..16 {
+            assert_eq!(list.alloc(i), Some(i as usize));
+        }
+        for i in 0..16 {
+            unsafe {
+                assert_eq!(list.free_unchecked(i as usize), i);
+            }
+        }
+        for i in 0..16 {
+            assert!(list.is_free(i));
+        }
+        for i in 0..16 {
+            list.alloc(i);
+        }
+        assert!(list.is_full());
+    }
+
+    #[test]
+    fn test_reuse_half() {
+        let mut list = FixedFreeList::<u32, 16>::new();
+        for i in 0..16 {
+            assert_eq!(list.alloc(i), Some(i as usize));
+        }
+        for i in 0..8 {
+            unsafe {
+                list.free_unchecked(i * 2usize);
+            }
+        }
+        for i in 0..8 {
+            list.alloc(i);
+        }
+        assert!(list.is_full());
+    }
+
+    #[test]
+    fn test_reuse_preferred() {
+        let mut list = FixedFreeList::<u32, 16>::new();
+        for i in 0..8 {
+            assert_eq!(list.alloc(i), Some(i as usize));
+        }
+        for i in 0..4 {
+            unsafe {
+                list.free_unchecked(i * 2usize);
+            }
+        }
+        for i in 0..4 {
+            list.alloc(i);
+        }
+        assert_eq!(list.size_hint(), 8);
+        for i in 8..16 {
+            assert_eq!(list.alloc(i), Some(i as usize));
+        }
+        assert!(list.is_full());
     }
 
     #[test]
@@ -662,6 +725,49 @@ mod test {
     impl<'a> Drop for DropCounted<'a> {
         fn drop(&mut self) {
             *self.0.borrow_mut() += 1;
+        }
+    }
+
+    #[test]
+    fn test_fuzz() {
+        fuzz::<0, 4>(10);
+        fuzz::<1, 8>(10);
+        fuzz::<2, 8>(10);
+        fuzz::<3, 8>(10);
+        fuzz::<5, 8>(10);
+        fuzz::<7, 16>(10);
+        fuzz::<16, 16>(10);
+        fuzz::<16, 64>(10);
+    }
+
+    fn fuzz<const N: usize, const M: usize>(iters: usize) {
+        for _ in 0..iters {
+            let mut list: FixedFreeList<usize, N> = FixedFreeList::new();
+            let mut keys = Vec::new();
+            let mut count = 0;
+            let mut high = 0;
+            for i in 0..M {
+                if rand::thread_rng().gen() {
+                    if let Some(key) = list.alloc(i) {
+                        keys.push(key);
+                        count += 1;
+                        if high < count {
+                            high = count;
+                        }
+                    } else {
+                        assert_eq!(count, N);
+                    }
+                } else if count > 0 {
+                    let key = keys.swap_remove(rand::thread_rng().gen_range(0..keys.len()));
+                    unsafe {
+                        assert!(!list.is_free(key));
+                        list.free_unchecked(key);
+                        assert!(list.is_free(key));
+                        count -= 1;
+                    }
+                }
+                assert_eq!(list.size_hint(), high);
+            }
         }
     }
 }

@@ -8,21 +8,21 @@ The minimum required Rust version for `fixed_free_list` is 1.63.0. To start usin
 
 ```toml
 [dependencies]
-fixed_free_list = "0.1"
+fixed_free_list = "0.2"
 ```
 
 For additional performance, enable `unstable` feature on nightly with
 
 ```toml
 [dependencies]
-fixed_free_list = { version = "0.1", features = ["unstable"] }
+fixed_free_list = { version = "0.2", features = ["unstable"] }
 ```
 
 For additional development-time memory safety verification at the cost of performance, enable `strict` feature with
 
 ```toml
 [dependencies]
-fixed_free_list = { version = "0.1", features = ["strict"] }
+fixed_free_list = { version = "0.2", features = ["strict"] }
 ```
 
 ## Example
@@ -38,6 +38,11 @@ let value = unsafe { list.get_mut_unchecked(key) };
 *value = 2;
 assert_eq!(unsafe { list.free_unchecked(key) }, 2);
 ```
+
+## Safety
+
+This crate uses unsafe code for performance.
+It has been extensively fuzz tested with miri to ensure it behaves correctly.
 
 ## License
 
