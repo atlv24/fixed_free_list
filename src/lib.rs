@@ -17,7 +17,7 @@ use std::{
     mem::{self, ManuallyDrop, MaybeUninit},
 };
 
-union Block<T, const N: usize> {
+union Block<T> {
     value: ManuallyDrop<T>,
     next: usize,
 }
@@ -50,7 +50,7 @@ union Block<T, const N: usize> {
 pub struct FixedFreeList<T, const N: usize> {
     next: usize,
     high: usize,
-    data: [MaybeUninit<Block<T, N>>; N],
+    data: [MaybeUninit<Block<T>>; N],
 }
 
 impl<T, const N: usize> FixedFreeList<T, N> {
