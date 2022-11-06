@@ -416,6 +416,7 @@ impl<'a, T, const N: usize, U: Fn()> SafeFixedFreeList<'a, T, N, U> {
     /// # use fixed_free_list::*;
     /// let mut list = unsafe { SafeFixedFreeList::<i32, 16, _>::new(||()) };
     /// ```
+    #[inline(always)]
     pub unsafe fn new(_: U) -> Self {
         Self {
             _marker: PhantomData,
@@ -441,6 +442,7 @@ impl<'a, T, const N: usize, U: Fn()> SafeFixedFreeList<'a, T, N, U> {
     /// let mut list = unsafe { SafeFixedFreeList::<i32, 16, _>::new(||()) };
     /// list.alloc(1);
     /// ```
+    #[inline(always)]
     pub fn alloc<'k>(&mut self, value: T) -> Option<ArenaKey<'k, U>>
     where
         'a: 'k,
@@ -466,6 +468,7 @@ impl<'a, T, const N: usize, U: Fn()> SafeFixedFreeList<'a, T, N, U> {
     /// let value = list.free(key);
     /// assert_eq!(value, 1);
     /// ```
+    #[inline(always)]
     pub fn free(&mut self, key: ArenaKey<U>) -> T {
         unsafe { self.inner.free_unchecked(key.index) }
     }
@@ -485,6 +488,7 @@ impl<'a, T, const N: usize, U: Fn()> SafeFixedFreeList<'a, T, N, U> {
     /// let value = list.get(&key);
     /// assert_eq!(*value, 1);
     /// ```
+    #[inline(always)]
     pub fn get<'k: 'v, 'v>(&self, key: &'k ArenaKey<U>) -> &'v T
     where
         'a: 'k,
@@ -508,6 +512,7 @@ impl<'a, T, const N: usize, U: Fn()> SafeFixedFreeList<'a, T, N, U> {
     /// *value = 2;
     /// assert_eq!(list.free(key), 2);
     /// ```
+    #[inline(always)]
     pub fn get_mut<'k: 'v, 'v>(&mut self, key: &'k mut ArenaKey<U>) -> &'v mut T
     where
         'a: 'k,
@@ -563,6 +568,7 @@ impl<'a, T, const N: usize, U: Fn()> SafeFixedFreeList<'a, T, N, U> {
     /// list.clear();
     /// assert!(!list.is_full());
     /// ```
+    #[inline(always)]
     pub fn clear(&mut self) {
         self.inner.clear();
     }
