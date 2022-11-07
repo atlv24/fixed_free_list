@@ -6,7 +6,8 @@
     trivial_casts,
     trivial_numeric_casts,
     unused_lifetimes,
-    unused_import_braces
+    unused_import_braces,
+    clippy::shadow_unrelated
 )]
 #![deny(missing_docs, unaligned_references, unsafe_op_in_unsafe_fn)]
 #![cfg_attr(all(nightly, feature = "unstable"), feature(maybe_uninit_uninit_array))]
@@ -311,8 +312,8 @@ impl<T, const N: usize> FixedFreeList<T, N> {
                 free[next] = true;
                 next = unsafe { self.data.get_unchecked(next).assume_init_ref().next };
             }
-            for (i, &free) in free.iter().enumerate().take(self.high) {
-                if !free {
+            for (i, &is_free) in free.iter().enumerate().take(self.high) {
+                if !is_free {
                     unsafe {
                         ManuallyDrop::drop(
                             &mut self.data.get_unchecked_mut(i).assume_init_mut().value,
