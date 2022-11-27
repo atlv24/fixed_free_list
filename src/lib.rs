@@ -390,10 +390,17 @@ impl<T, const N: usize> Default for FixedFreeList<T, N> {
 }
 
 /// A lifetimed key into a `SafeFixedFreeList`
-#[derive(Debug)]
 pub struct ArenaKey<'a, T> {
     index: usize,
     _marker: PhantomData<&'a T>,
+}
+
+impl<'a, T> Debug for ArenaKey<'a, T> {
+    fn fmt(&self, f: &mut Formatter) -> Result {
+        f.debug_struct("ArenaKey")
+            .field("index", &self.index)
+            .finish()
+    }
 }
 
 /// A fixed-size free-list with key lifetime safety and macroless unique typing.
@@ -593,34 +600,74 @@ mod test {
     use std::cell::RefCell;
 
     #[test]
+    fn test_default() {
+        let heap: FixedFreeList<i32, 4> = FixedFreeList::default();
+        assert_eq!(0, heap.high);
+    }
+
+    #[test]
     fn test_safe() {
         fn consume<T>(_: T) {}
-        let mut list = unsafe { SafeFixedFreeList::<u32, 16, _>::new(|| ()) };
+        let mut list = unsafe { SafeFixedFreeList::<u32, 4, _>::new(|| ()) };
+        assert_eq!(0, list.size_hint());
         let mut key1 = list.alloc(5).unwrap();
         let mut key2 = list.alloc(6).unwrap();
+        assert_eq!(2, list.size_hint());
         let value1 = list.get_mut(&mut key1);
         let value2 = list.get_mut(&mut key2);
         // miri hates this, I think its a valid abuse of borrowck though
         *value1 = 2;
         consume(value1);
         consume(value2);
+        assert_eq!(&2, list.get(&key1));
+        assert_eq!(&6, list.get(&key2));
+        assert!(!list.is_full());
+        assert_eq!(format!("{:?}", key1), "ArenaKey { index: 0 }");
         list.free(key1);
         list.free(key2);
+        assert_eq!(2, list.size_hint());
+        assert_eq!(format!("{:?}", list), "SafeFixedFreeList { inner: FixedFreeList { next: 1, high: 2, data: [Free(4), Free(0), Uninit, Uninit] } }");
+        list.clear();
+        assert_eq!(0, list.size_hint());
         consume(list);
     }
 
     #[test]
-    fn test_remove_all() {
-        let mut list = FixedFreeList::<u32, 16>::new();
+    fn test_get_unchecked() {
+        let mut list = FixedFreeList::<usize, 16>::new();
         for i in 0..16 {
-            assert_eq!(list.alloc(i), Some(i as usize));
+            assert_eq!(list.alloc(i), Some(i));
         }
         for i in 0..16 {
             unsafe {
-                assert_eq!(list.free_unchecked(i as usize), i);
+                assert_eq!(list.get_unchecked(i), &i);
             }
         }
         for i in 0..16 {
+            unsafe {
+                *list.get_mut_unchecked(i) = i * 2;
+            }
+        }
+        for i in 0..16 {
+            unsafe {
+                assert_eq!(list.get_unchecked(i), &(i * 2));
+            }
+        }
+        assert!(list.is_full());
+    }
+
+    #[test]
+    fn test_remove_all() {
+        let mut list = FixedFreeList::<usize, 16>::new();
+        for i in 0..16 {
+            assert_eq!(list.alloc(i), Some(i));
+        }
+        for i in 0..16 {
+            unsafe {
+                assert_eq!(list.free_unchecked(i), i);
+            }
+        }
+        for i in 0..17 {
             assert!(list.is_free(i));
         }
         for i in 0..16 {
@@ -631,13 +678,13 @@ mod test {
 
     #[test]
     fn test_reuse_half() {
-        let mut list = FixedFreeList::<u32, 16>::new();
+        let mut list = FixedFreeList::<usize, 16>::new();
         for i in 0..16 {
-            assert_eq!(list.alloc(i), Some(i as usize));
+            assert_eq!(list.alloc(i), Some(i));
         }
         for i in 0..8 {
             unsafe {
-                list.free_unchecked(i * 2usize);
+                list.free_unchecked(i * 2);
             }
         }
         for i in 0..8 {
@@ -726,7 +773,6 @@ mod test {
         assert_eq!(*drops.borrow(), 13);
     }
 
-    #[derive(Clone)]
     struct DropCounted<'a>(&'a RefCell<usize>);
 
     impl<'a> Drop for DropCounted<'a> {
